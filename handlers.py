@@ -1,11 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from db import Session, User, Channel, Group, GroupChannel
-import os, redis, rq
-
-REDIS = os.getenv("REDIS_URL")
-conn = redis.from_url(REDIS)
-q = rq.Queue(connection=conn)
+from queue_worker import forward  # Chamada direta, sem fila
 
 def start(update: Update, ctx: CallbackContext):
     sess = Session()
@@ -100,4 +96,5 @@ def new_post(update: Update, ctx: CallbackContext):
         group = gc.group
         for target in group.channels:
             if target.accepted and target.channel_id != update.effective_chat.id:
-                q.enqueue('queue_worker.forward', update.message.chat.id, target.channel_id, update.message.message_id)
+                forward(update.message.chat.id, target.channel_id, update.message.message_id)
+                
