@@ -5,15 +5,15 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters
 )
-from handlers import start, criar_grupo, adicionar_canal, new_post, handle_callback_query
+from handlers import start, new_post, handle_callback_query
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
+
+# Apenas comandos ativos (baseados em menu)
 bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CommandHandler("criar_grupo", criar_grupo))
-bot_app.add_handler(CommandHandler("adicionar_canal", adicionar_canal))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, new_post))
 
@@ -35,4 +35,4 @@ async def webhook_entry(request: Request):
 
 @app.get("/")
 async def root():
-    return {"status": "Bot rodando!"}
+    return {"status": "Bot rodando com menu interativo!"}
