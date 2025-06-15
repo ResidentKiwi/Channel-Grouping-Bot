@@ -22,11 +22,13 @@ bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, new_p
 app = FastAPI()
 telegram_bot = Bot(TOKEN)
 
+
 @app.on_event("startup")
 async def setup_webhook():
+    await bot_app.initialize()  # ✅ ESSENCIAL
     await telegram_bot.delete_webhook()
     await telegram_bot.set_webhook(url=WEBHOOK_URL)
-
+    
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
     data = await req.json()
