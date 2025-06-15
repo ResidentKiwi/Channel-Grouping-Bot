@@ -1,6 +1,6 @@
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 import os
-from handlers import start, criar_grupo, adicionar_canal, aceitar_convite, new_post, handle_callback_query
+from handlers import start, criar_grupo, adicionar_canal, new_post, handle_callback_query
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
