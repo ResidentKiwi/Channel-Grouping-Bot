@@ -1,5 +1,5 @@
 python-telegram-bot==20.0
 SQLAlchemy
 psycopg2-binary
-redis
-rq
+fastapi
+uvicorn
