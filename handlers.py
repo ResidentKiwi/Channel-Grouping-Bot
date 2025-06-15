@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db import Session, User, Channel, Group, GroupChannel
-from queue_worker import forward  # Chamada direta, sem fila
+from queue_worker import forward
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sess = Session()
@@ -54,7 +54,6 @@ async def adicionar_canal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         channel.owner_id = owner.id
         sess.commit()
 
-        # Se o dono for o mesmo que adicionou, aceita automaticamente
         if owner.id == user.id:
             gc.accepted = True
             sess.commit()
@@ -107,4 +106,37 @@ async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         group = gc.group
         for target in group.channels:
             if target.accepted and target.channel_id != msg.chat.id:
-                forward(msg.chat.id, target.channel_id, msg.message_id)
+                await forward(msg.chat.id, target.channel_id, msg.message_id)
+
+async def meuscanais(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    sess = Session()
+    canais = sess.query(Channel).filter_by(owner_id=update.effective_user.id).all()
+    if not canais:
+        return await update.message.reply_text("Você não é dono de nenhum canal.")
+    texto = "Seus canais:\n" + "\n".join([f"• ID: {c.id}" for c in canais])
+    await update.message.reply_text(texto)
+
+async def meusgrupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    sess = Session()
+    canais = sess.query(Channel).filter_by(owner_id=update.effective_user.id).all()
+    if not canais:
+        return await update.message.reply_text("Você não possui canais associados a grupos.")
+    texto = "Grupos em que seus canais participam:\n"
+    for canal in canais:
+        grupos = sess.query(GroupChannel).filter_by(channel_id=canal.id, accepted=True).all()
+        for g in grupos:
+            texto += f"• Canal {canal.id} → Grupo '{g.group.name}' (ID: {g.group_id})\n"
+    await update.message.reply_text(texto or "Nenhum grupo encontrado.")
+
+async def sair_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    sess = Session()
+    canais = sess.query(Channel).filter_by(owner_id=update.effective_user.id).all()
+    if not canais:
+        return await update.message.reply_text("Você não possui canais associados.")
+
+    texto = "Envie o ID do grupo que deseja sair (deve ser dono do canal correspondente).\n"
+    for canal in canais:
+        grupos = sess.query(GroupChannel).filter_by(channel_id=canal.id, accepted=True).all()
+        for g in grupos:
+            texto += f"• Canal {canal.id} → Grupo '{g.group.name}' (ID: {g.group_id})\n"
+    await update.message.reply_text(texto)
