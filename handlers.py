@@ -12,10 +12,25 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     menu = []
     if owns:
         menu.append([InlineKeyboardButton("🛠 Gerenciar meus grupos", callback_data="menu_meus_grupos")])
+    menu.append([InlineKeyboardButton("➕ Criar novo grupo", callback_data="criar_grupo")])
     menu.append([InlineKeyboardButton("📋 Meus canais", callback_data="menu_meus_canais")])
     await update.message.reply_text("Escolha uma opção:", reply_markup=InlineKeyboardMarkup(menu))
 
-# ─────── Gerenciar Grupos (dono) ───────
+async def prompt_criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query; await query.answer()
+    await query.edit_message_text("📌 Envie agora o comando no formato:\n/criar_grupo NomeDoGrupo")
+
+async def criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    parts = update.message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return await update.message.reply_text("❌ Use: /criar_grupo NomeDoGrupo")
+    name = parts[1]
+    sess = Session()
+    g = Group(name=name, owner_id=update.effective_user.id)
+    sess.add(g); sess.commit()
+    await update.message.reply_text(f"✅ Grupo '{name}' criado com sucesso!")
+
+# ─────── Gerenciar Grupos ───────
 
 async def menu_meus_grupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -65,10 +80,9 @@ async def remove_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if gc:
         sess.delete(gc); sess.commit()
     await query.edit_message_text("✅ Canal removido.")
-    # Voltar ao menu do grupo
     return await handle_grupo_actions(update, ctx)
 
-# ─────── Meus Canais (todos os usuários) ───────
+# ─────── Meus Canais ───────
 
 async def menu_meus_canais(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
@@ -83,13 +97,14 @@ async def menu_meus_canais(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• {chat.title}{uname} — ID: {c.id}")
     await query.edit_message_text("\n".join(lines))
 
-# ─────── Convites — aceita/recusa ───────
+# ─────── Convites ───────
 
 async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = update.callback_query.data
     if data.startswith("aceitar_") or data.startswith("recusar_"):
-        # convite de canal
         return await handle_convite(update, ctx)
+    if data == "criar_grupo":
+        return await prompt_criar_grupo(update, ctx)
     if data == "menu_meus_grupos":
         return await menu_meus_grupos(update, ctx)
     if data.startswith("gerenciar_grupo_"):
@@ -119,16 +134,14 @@ async def handle_convite(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         gc.accepted = True; sess.commit()
         await query.edit_message_text(f"✅ Canal aceito no grupo '{group.name}'.")
         if inviter:
-            await ctx.bot.send_message(inviter.id,
-                f"✅ O canal {owner_canal.id} entrou no grupo '{group.name}'.")
+            await ctx.bot.send_message(inviter.id, f"✅ O canal {owner_canal.id} entrou no grupo '{group.name}'.")
     else:
         sess.delete(gc); sess.commit()
         await query.edit_message_text("❌ Convite recusado.")
         if inviter:
-            await ctx.bot.send_message(inviter.id,
-                f"❌ O canal {owner_canal.id} recusou o convite.")
+            await ctx.bot.send_message(inviter.id, f"❌ O canal {owner_canal.id} recusou o convite.")
 
-# ─────── Postagens em grupo ───────
+# ─────── Postagens ───────
 
 async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
