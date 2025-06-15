@@ -54,18 +54,25 @@ async def adicionar_canal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         channel.owner_id = owner.id
         sess.commit()
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Aceitar", callback_data=f"aceitar_{group.id}_{channel.id}"),
-             InlineKeyboardButton("❌ Recusar", callback_data=f"recusar_{group.id}_{channel.id}")]
-        ])
+        # Se o dono for o mesmo que adicionou, aceita automaticamente
+        if owner.id == user.id:
+            gc.accepted = True
+            sess.commit()
+            await update.message.reply_text("Você é o dono do canal. Ele foi adicionado automaticamente ao grupo.")
+        else:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Aceitar", callback_data=f"aceitar_{group.id}_{channel.id}"),
+                 InlineKeyboardButton("❌ Recusar", callback_data=f"recusar_{group.id}_{channel.id}")]
+            ])
 
-        await ctx.bot.send_message(
-            chat_id=owner.id,
-            text=f"O canal @{channel_username} foi convidado para o grupo '{group.name}'. Deseja aceitar?",
-            reply_markup=keyboard
-        )
-
-    await update.message.reply_text("Solicitação enviada ao dono do canal.")
+            await ctx.bot.send_message(
+                chat_id=owner.id,
+                text=f"O canal @{channel_username} foi convidado para o grupo '{group.name}'. Deseja aceitar?",
+                reply_markup=keyboard
+            )
+            await update.message.reply_text("Solicitação enviada ao dono do canal.")
+    else:
+        await update.message.reply_text("Não foi possível identificar o dono do canal.")
 
 async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -90,10 +97,14 @@ async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Convite recusado.")
 
 async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    msg = update.channel_post
+    if msg is None:
+        return
+
     sess = Session()
-    groupch = sess.query(GroupChannel).filter_by(channel_id=update.effective_chat.id, accepted=True).all()
+    groupch = sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all()
     for gc in groupch:
         group = gc.group
         for target in group.channels:
-            if target.accepted and target.channel_id != update.effective_chat.id:
-                forward(update.message.chat.id, target.channel_id, update.message.message_id)
+            if target.accepted and target.channel_id != msg.chat.id:
+                forward(msg.chat.id, target.channel_id, msg.message_id)
