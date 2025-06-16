@@ -33,8 +33,10 @@ class GroupChannel(Base):
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     channel_id = Column(BigInteger, ForeignKey("channels.id"))
+    inviter_id = Column(BigInteger, ForeignKey("users.id"))
     accepted = Column(Boolean, default=None)
     group = relationship("Group", back_populates="channels")
     channel = relationship("Channel")
+    inviter = relationship("User", foreign_keys=[inviter_id])
 
 Base.metadata.create_all(engine)
