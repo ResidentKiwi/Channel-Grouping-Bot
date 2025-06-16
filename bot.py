@@ -6,29 +6,21 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters
 )
-from handlers import (
-    start, new_post, handle_callback_query,
-    handle_text_message
-)
+from handlers import start, new_post, handle_callback_query, handle_text_message
 
-# Ativa logs úteis
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Tokens e URL do webhook
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Instância do aplicativo do Telegram
 bot_app = ApplicationBuilder().token(TOKEN).build()
 
-# Registro dos handlers
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, new_post))
 
-# FastAPI para receber webhook
 telegram_bot = Bot(TOKEN)
 app = FastAPI()
 
