@@ -19,14 +19,14 @@ class Channel(Base):
     username = Column(String)
     title = Column(String)
     authenticated = Column(Boolean, default=False)
-    owner = relationship("User")
+    owner = relationship("User", foreign_keys=[owner_id])
 
 class Group(Base):
     __tablename__ = "groups"
     id = Column(Integer, primary_key=True)
     name = Column(String)
     owner_id = Column(BigInteger, ForeignKey("users.id"))
-    owner = relationship("User")
+    owner = relationship("User", foreign_keys=[owner_id])
     channels = relationship("GroupChannel", back_populates="group")
 
 class GroupChannel(Base):
@@ -38,6 +38,6 @@ class GroupChannel(Base):
     accepted = Column(Boolean, default=None)
     group = relationship("Group", back_populates="channels")
     channel = relationship("Channel")
-    inviter = relationship("User")
+    inviter = relationship("User", foreign_keys=[inviter_id])
 
 Base.metadata.create_all(engine)
