@@ -18,6 +18,7 @@ class Channel(Base):
     owner_id = Column(BigInteger, ForeignKey("users.id"))
     username = Column(String)
     title = Column(String)
+    authenticated = Column(Boolean, default=False)
     owner = relationship("User")
 
 class Group(Base):
