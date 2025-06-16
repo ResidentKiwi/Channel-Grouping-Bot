@@ -5,9 +5,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters
 )
-from handlers import (
-    start, criar_grupo, new_post, handle_callback_query
-)
+from handlers import start, criar_grupo, new_post, handle_callback_query
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -36,4 +34,4 @@ async def webhook_entry(request: Request):
 
 @app.get("/")
 async def root():
-    return {"status": "Bot rodando com menu inteligente!"}
+    return {"status": "Bot rodando!"}
