@@ -45,11 +45,25 @@ async def receive_group_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_states.get(user_id) != "awaiting_group_name":
         return
+
     name = update.message.text.strip()
     sess = Session()
+
+    # ✅ Verifica se o usuário existe, senão registra
+    user = sess.get(User, user_id)
+    if not user:
+        user = User(id=user_id, username=update.effective_user.username)
+        sess.add(user)
+        sess.commit()
+
+    # ✅ Cria o grupo normalmente
     g = Group(name=name, owner_id=user_id)
-    sess.add(g); sess.commit()
+    sess.add(g)
+    sess.commit()
+
     await update.message.reply_text(f"✅ Grupo *{name}* criado com sucesso!", parse_mode="Markdown")
+
+    # Limpa o estado do usuário
     user_states.pop(user_id, None)
 
 # ─── Gerenciamento de grupos ───
