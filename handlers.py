@@ -346,3 +346,11 @@ async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if prefix in route_map:
         return await route_map[prefix](update, ctx)
     await update.callback_query.answer("⚠️ Ação não reconhecida.")
+
+async def convite_manual(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.callback_query.from_user.id
+    gid = int(update.callback_query.data.split("_")[1])
+    user_states[uid] = {"state": "awaiting_channel_invite", "group_id": gid}
+    await update.callback_query.answer()
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancelar", callback_data=f"gerenciar_{gid}")]])
+    await safe_edit(update.callback_query, "📥 Envie @username ou link do canal:", markup)
