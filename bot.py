@@ -5,14 +5,14 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters
 )
-from handlers import start, receive_group_name, criar_grupo, new_post, handle_callback_query
+from handlers import start, receive_group_name, new_post, handle_callback_query
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
+
 bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CommandHandler("criar_grupo", criar_grupo))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_group_name))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, new_post))
@@ -34,4 +34,4 @@ async def webhook(request: Request):
 
 @app.get("/")
 async def root():
-    return {"status": "Bot rodando!"}
+    return {"status": "Bot rodando com webhook!"}
