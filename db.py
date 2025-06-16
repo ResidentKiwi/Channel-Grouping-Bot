@@ -10,22 +10,30 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(BigInteger, primary_key=True)  # agora suporta IDs grandes
+    id = Column(BigInteger, primary_key=True)  # ID do Telegram
     username = Column(String)
+
+    channels = relationship("Channel", back_populates="owner")
+    groups = relationship("Group", back_populates="owner")
 
 class Channel(Base):
     __tablename__ = "channels"
-    id = Column(BigInteger, primary_key=True)
+    id = Column(BigInteger, primary_key=True)  # ID do canal no Telegram
     owner_id = Column(BigInteger, ForeignKey("users.id"))
-    owner = relationship("User")
+    username = Column(String)
+    title = Column(String)
+
+    owner = relationship("User", back_populates="channels")
+    group_links = relationship("GroupChannel", back_populates="channel")
 
 class Group(Base):
     __tablename__ = "groups"
     id = Column(Integer, primary_key=True)
     name = Column(String)
     owner_id = Column(BigInteger, ForeignKey("users.id"))
-    owner = relationship("User")
-    channels = relationship("GroupChannel", back_populates="group")
+
+    owner = relationship("User", back_populates="groups")
+    channels = relationship("GroupChannel", back_populates="group", cascade="all, delete-orphan")
 
 class GroupChannel(Base):
     __tablename__ = "group_channels"
@@ -33,7 +41,8 @@ class GroupChannel(Base):
     group_id = Column(Integer, ForeignKey("groups.id"))
     channel_id = Column(BigInteger, ForeignKey("channels.id"))
     accepted = Column(Boolean, default=False)
+
     group = relationship("Group", back_populates="channels")
-    channel = relationship("Channel")
+    channel = relationship("Channel", back_populates="group_links")
 
 Base.metadata.create_all(engine)
