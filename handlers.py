@@ -19,9 +19,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user = User(id=uid, username=update.effective_user.username)
         sess.add(user)
         sess.commit()
-
     owns = sess.query(Group).filter_by(owner_id=uid).count() > 0
-
     kb = []
     if owns:
         kb.append([InlineKeyboardButton("🛠 Meus grupos", callback_data="menu_meus_grupos")])
@@ -30,12 +28,10 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 Meus canais", callback_data="menu_meus_canais")],
         [InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda")],
     ]
-
     if update.message:
         await update.message.reply_text("Escolha uma opção:", reply_markup=InlineKeyboardMarkup(kb))
     else:
         await update.callback_query.edit_message_text("Escolha uma opção:", reply_markup=InlineKeyboardMarkup(kb))
-
     user_states.pop(uid, None)
 
 async def menu_ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -105,15 +101,12 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not update.message:
         return
-
     text = update.message.text.strip()
     st = user_states.get(uid)
     if not st:
         logger.info("handle_text_message(): no state for user %s", uid)
         return
-
     sess = Session()
-
     if st["state"] == "awaiting_group_name":
         logger.info("Creating group with name '%s' for user %s", text, uid)
         user = sess.get(User, uid) or User(id=uid, username=update.effective_user.username)
@@ -123,7 +116,6 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Grupo *{text}* criado com sucesso!", parse_mode="Markdown")
         user_states.pop(uid, None)
         return
-
     if st["state"] == "awaiting_channel_invite":
         logger.info("Inviting channel '%s' for user %s", text, uid)
         match = re.search(r"@([A-Za-z0-9_]+)", text) or re.search(r"(?:t\.me/)([A-Za-z0-9_]+)", text)
@@ -160,6 +152,127 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_states.pop(uid, None)
         return
 
-# (Inclua aqui as outras funções: handle_convite_response, remocao_canal, remover_confirm,
-# prompt_delete_group, delete_confirm, menu_meus_canais, new_post, handle_callback_query,
-# exatamente como antes — sem alterações.)
+async def handle_convite_response(update: Update, ctx: ContextTypes.DefaultTYPE):
+    logger.info("handle_convite_response() %s", update.callback_query.data)
+    q = update.callback_query; await q.answer()
+    _, action, gid, cid = q.data.split("_")
+    sess = Session()
+    gc = sess.query(GroupChannel).filter_by(group_id=int(gid), channel_id=int(cid)).first()
+    if not gc:
+        return await q.edit_message_text("❌ Convite inválido.")
+    group = sess.get(Group, gid)
+    chan = sess.get(Channel, cid)
+    dono = sess.get(User, group.owner_id)
+    if action == "aceitar":
+        gc.accepted = True
+        sess.commit()
+        await q.edit_message_text(f"✅ Canal *{chan.title}* entrou no grupo *{group.name}*.", parse_mode="Markdown")
+        await ctx.bot.send_message(dono.id, f"✅ Canal {chan.title} aceitou o convite no grupo *{group.name}*.")
+    else:
+        sess.delete(gc); sess.commit()
+        await q.edit_message_text(f"❌ Canal *{chan.title}* recusou o convite para o grupo *{group.name}*.", parse_mode="Markdown")
+        await ctx.bot.send_message(dono.id, f"❌ Canal {chan.title} recusou o convite para o grupo *{group.name}*.")
+
+async def remocao_canal(update: Update, ctx: ContextTypes.DefaultTYPE):
+    logger.info("remocao_canal() %s", update.callback_query.data)
+    q = update.callback_query; await q.answer()
+    gid = int(q.data.split("_")[-1])
+    sess = Session()
+    canais = sess.query(GroupChannel).filter_by(group_id=gid, accepted=True).all()
+    if not canais:
+        return await q.edit_message_text("🚫 Nenhum canal para remover.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data=f"gerenciar_{gid}")]]))
+    buttons = [[InlineKeyboardButton(sess.get(Channel, gc.channel_id).title, callback_data=f"remover_confirm_{gid}_{gc.channel_id}")] for gc in canais]
+    buttons.append([InlineKeyboardButton("↩️ Voltar", callback_data=f"gerenciar_{gid}")])
+    await q.edit_message_text("Escolha o canal para remover do grupo:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def remover_confirm(update: Update, ctx: ContextTypes.DefaultTYPE):
+    logger.info("remover_confirm() %s", update.callback_query.data)
+    q = update.callback_query; await q.answer()
+    _, _, gid, cid = q.data.split("_")
+    sess = Session()
+    gc = sess.query(GroupChannel).filter_by(group_id=int(gid), channel_id=int(cid)).first()
+    if gc:
+        sess.delete(gc); sess.commit()
+    return await handle_grupo_actions(update, ctx)
+
+async def prompt_delete_group(update: Update, ctx: ContextTypes.DefaultTYPE):
+    logger.info("prompt_delete_group() %s", update.callback_query.data)
+    q = update.callback_query; await q.answer()
+    gid = int(q.data.split("_")[-1])
+    kb = [
+        [InlineKeyboardButton("✅ Sim, apagar", callback_data=f"delete_confirm_{gid}")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data=f"gerenciar_{gid}")],
+    ]
+    await q.edit_message_text(
+        "⚠️ Tem certeza que deseja apagar esse grupo? Esta ação é permanente.",
+        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def delete_confirm(update: Update, ctx: ContextTypes.DefaultTYPE):
+    logger.info("delete_confirm() %s", update.callback_query.data)
+    q = update.callback_query; await q.answer()
+    gid = int(q.data.split("_")[-1])
+    sess = Session()
+    sess.query(GroupChannel).filter_by(group_id=gid).delete()
+    sess.query(Group).filter_by(id=gid).delete()
+    sess.commit()
+    await q.edit_message_text("✅ Grupo apagado com sucesso.")
+    return await menu_meus_grupos(update, ctx)
+
+async def menu_meus_canais(update: Update, ctx: ContextTypes.DefaultTYPE):
+    uid = update.callback_query.from_user.id
+    logger.info("menu_meus_canais() called by %s", uid)
+    q = update.callback_query; await q.answer()
+    sess = Session()
+    chans = sess.query(Channel).filter_by(owner_id=uid).all()
+    if not chans:
+        return await q.edit_message_text(
+            "🚫 Você não tem canais registrados.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]])
+        )
+    text = "📋 *Seus canais:*"
+    for c in chans:
+        link = f"https://t.me/{c.username}" if c.username else f"ID:{c.id}"
+        text += f"\n• {c.title} — {link}"
+    await q.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+
+async def new_post(update: Update, ctx: ContextTypes.DefaultTYPE):
+    msg = update.channel_post
+    if not msg:
+        return
+    logger.info("new_post() from channel %s", msg.chat.id)
+    sess = Session()
+    targets = sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all()
+    for gc in targets:
+        grupo = sess.get(Group, gc.group_id)
+        for tc in grupo.channels:
+            if tc.accepted and tc.channel_id != msg.chat.id:
+                await forward(msg.chat.id, tc.channel_id, msg.message_id)
+
+async def handle_callback_query(update: Update, ctx: ContextTypes.DefaultTYPE):
+    logger.info("handle_callback_query() %s", update.callback_query.data)
+    data = update.callback_query.data
+    if data.startswith(("aceitar_", "recusar_")):
+        return await handle_convite_response(update, ctx)
+    if data == "criar_grupo":
+        return await menu_criar_grupo(update, ctx)
+    if data == "menu_meus_grupos":
+        return await menu_meus_grupos(update, ctx)
+    if data.startswith("gerenciar_"):
+        return await handle_grupo_actions(update, ctx)
+    if data.startswith("convite_"):
+        return await convite_canal(update, ctx)
+    if data.startswith("remover_"):
+        return await remocao_canal(update, ctx)
+    if data.startswith("remover_confirm_"):
+        return await remover_confirm(update, ctx)
+    if data.startswith("delete_") and "confirm" not in data:
+        return await prompt_delete_group(update, ctx)
+    if data.startswith("delete_confirm_"):
+        return await delete_confirm(update, ctx)
+    if data == "menu_meus_canais":
+        return await menu_meus_canais(update, ctx)
+    if data == "menu_ajuda":
+        return await menu_ajuda(update, ctx)
+    if data == "start":
+        return await start(update, ctx)
