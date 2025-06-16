@@ -15,7 +15,6 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
-
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
