@@ -6,26 +6,29 @@ from queue_worker import forward
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-user_states = {}
+user_states: dict[int, dict] = {}
 
-# 1️⃣ Autenticar canal quando ele posta
+# 1️⃣ Autenticação de canal admin
 async def channel_authenticate(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
-    if not msg or not getattr(msg, "chat", None) or msg.chat.type != "channel":
+    if not msg or msg.chat.type != "channel":
         return
     sess = Session()
     ch = sess.get(Channel, msg.chat.id)
-    admins = await ctx.bot.get_chat_administrators(msg.chat.id)
-    creator = next((a.user for a in admins if a.status == "creator" and not a.user.is_bot), None)
-    owner_id = creator.id if creator else None
-    if not owner_id:
+    try:
+        admins = await ctx.bot.get_chat_administrators(msg.chat.id)
+    except Exception as e:
+        logger.error("Erro ao obter admins: %s", e)
         return
-    if not sess.get(User, owner_id):
-        sess.add(User(id=owner_id, username=creator.username))
+    creator = next((a.user for a in admins if a.status == "creator" and not a.user.is_bot), None)
+    if not creator:
+        return
+    if not sess.get(User, creator.id):
+        sess.add(User(id=creator.id, username=creator.username))
     if not ch:
         ch = Channel(
             id=msg.chat.id,
-            owner_id=owner_id,
+            owner_id=creator.id,
             username=msg.chat.username,
             title=msg.chat.title,
             authenticated=True,
@@ -41,79 +44,77 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     sess = Session()
     if not sess.get(User, uid):
-        sess.add(User(id=uid, username=update.effective_user.username)); sess.commit()
+        sess.add(User(id=uid, username=update.effective_user.username))
+        sess.commit()
     owns = sess.query(Group).filter_by(owner_id=uid).count() > 0
     participates = sess.query(GroupChannel).filter_by(channel_id=uid, accepted=True).count() > 0
 
     kb = []
-    if owns: kb.append([InlineKeyboardButton("🛠 Meus grupos", callback_data="menu_meus_grupos")])
+    if owns:
+        kb.append([InlineKeyboardButton("🛠 Meus grupos", callback_data="menu_meus_grupos")])
     kb += [
         [InlineKeyboardButton("➕ Criar grupo", callback_data="criar_grupo")],
         [InlineKeyboardButton("📋 Meus canais", callback_data="menu_meus_canais")],
         [InlineKeyboardButton("🌐 Explorar grupos", callback_data="explorar_grupos")],
     ]
-    if participates: kb.append([InlineKeyboardButton("🚪 Sair de grupo", callback_data="menu_sair_grupo")])
+    if participates:
+        kb.append([InlineKeyboardButton("🚪 Sair de grupo", callback_data="menu_sair_grupo")])
     kb.append([InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda")])
-    markup = InlineKeyboardMarkup(kb)
+    keyboard = InlineKeyboardMarkup(kb)
 
     if update.message:
-        await update.message.reply_text("Escolha uma opção:", reply_markup=markup)
+        await update.message.reply_text("Escolha:", reply_markup=keyboard)
     else:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Escolha uma opção:", reply_markup=markup)
+        await update.callback_query.edit_message_text("Escolha:", reply_markup=keyboard)
     user_states.pop(uid, None)
 
 # 3️⃣ Ajuda
 async def menu_ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     texto = (
-        "👋 Use o bot para:\n"
-        "• Criar grupos e canais\n"
-        "• Convidar canais (bot deve ser admin)\n"
-        "• Explorar grupos públicos\n"
-        "• Solicitar entrada em grupo\n"
-        "• Replicar posts entre canais\n"
-        "• Sair de grupos\n"
-        "Volte com /start"
+        "👋 Funcionalidades:\n"
+        "- Criar grupos\n"
+        "- Convidar canais\n"
+        "- Explorar grupos\n"
+        "- Solicitar entrada\n"
+        "- Replicar posts\n"
+        "- Sair de grupos\n"
+        "Volte ao início com /start"
     )
-    kb = [[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]
-    await update.callback_query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(kb))
+    await update.callback_query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
 
 # 4️⃣ Criar grupo
 async def menu_criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     user_states[uid] = {"state": "awaiting_group_name"}
-    kb = [[InlineKeyboardButton("↩️ Cancelar", callback_data="start")]]
-    await update.callback_query.edit_message_text("📌 Envie o nome do grupo:", reply_markup=InlineKeyboardMarkup(kb))
+    await update.callback_query.edit_message_text("📌 Digite o nome do grupo:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancelar", callback_data="start")]]))
 
-# 5️⃣ Meus grupos
+# 5️⃣ "Meus grupos"
 async def menu_meus_grupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     sess = Session()
     grps = sess.query(Group).filter_by(owner_id=uid).all()
     if not grps:
-        return await update.callback_query.edit_message_text(
-            "🚫 Você não tem grupos.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]])
-        )
+        await update.callback_query.edit_message_text("🚫 Sem grupos ainda.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        return
     kb = [[InlineKeyboardButton(g.name, callback_data=f"gerenciar_{g.id}")] for g in grps]
     kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="start")])
-    await update.callback_query.edit_message_text("Seus grupos:", reply_markup=InlineKeyboardMarkup(kb))
+    await update.callback_query.edit_message_text("📂 Seus grupos:", reply_markup=InlineKeyboardMarkup(kb))
 
-# 6️⃣ Explorar grupos públicos
+# 6️⃣ Explore
 async def explorar_grupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     sess = Session()
     grps = sess.query(Group).all()
     if not grps:
-        return await update.callback_query.edit_message_text("Ainda não há grupos criados.")
-    kb = []
-    for g in grps:
-        count = sess.query(GroupChannel).filter_by(group_id=g.id, accepted=True).count()
-        kb.append([InlineKeyboardButton(f"{g.name} ({count} canais)", callback_data=f"vergrp_{g.id}")])
+        await update.callback_query.edit_message_text("Ainda não há grupos.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        return
+    kb = [[InlineKeyboardButton(f"{g.name} ({sess.query(GroupChannel).filter_by(group_id=g.id, accepted=True).count()} canais)", callback_data=f"vergrp_{g.id}")] for g in grps]
     kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="start")])
-    await update.callback_query.edit_message_text("🌐 Grupos disponíveis:", reply_markup=InlineKeyboardMarkup(kb))
+    await update.callback_query.edit_message_text("🌐 Grupos:", reply_markup=InlineKeyboardMarkup(kb))
 
 # 7️⃣ Ver grupo
 async def ver_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -122,46 +123,48 @@ async def ver_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sess = Session()
     g = sess.get(Group, gid)
     participants = sess.query(GroupChannel).filter_by(group_id=gid, accepted=True).all()
-    text = f"📁 *{g.name}*\nCanais:\n"
+    text = f"📁 *{g.name}*\nCanais:"
     for gc in participants:
         ch = sess.get(Channel, gc.channel_id)
-        subs = await ctx.bot.get_chat_members_count(ch.id)
+        try:
+            subs = await ctx.bot.get_chat_members_count(ch.id)
+        except:
+            subs = "?"
         link = f"https://t.me/{ch.username}" if ch.username else f"ID:{ch.id}"
-        text += f"- [{ch.title}]({link}) — {subs} inscritos\n"
-    text += "\nSolicite entrada:"
+        text += f"\n- [{ch.title}]({link}) — {subs}"
     kb = [
         [InlineKeyboardButton("📩 Solicitar entrada", callback_data=f"solicit_{gid}")],
         [InlineKeyboardButton("↩️ Voltar", callback_data="explorar_grupos")]
     ]
     await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
 
-# 8️⃣ Solicitar entrada
+# 8️⃣ Solicitar
 async def solicitar_entrada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     gid = int(update.callback_query.data.split("_")[1])
     sess = Session()
-    exists = sess.query(GroupChannel).filter_by(group_id=gid, channel_id=uid).first()
-    if exists:
-        return await update.callback_query.edit_message_text("Você já participa ou solicitou.")
+    if sess.query(GroupChannel).filter_by(group_id=gid, channel_id=uid).first():
+        await update.callback_query.edit_message_text("Você já solicitou ou está no grupo.")
+        return
+    ch = sess.get(Channel, uid)
+    if not ch or not ch.authenticated:
+        await update.callback_query.edit_message_text("❌ Canal não autenticado.")
+        return
     g = sess.get(Group, gid)
-    inviter_chan = sess.get(Channel, uid)
-    if not inviter_chan or not inviter_chan.authenticated:
-        return await update.callback_query.edit_message_text("❌ Seu canal ainda não está autenticado.")
     dono = sess.get(User, g.owner_id)
-    link = f"https://t.me/{inviter_chan.username}" if inviter_chan.username else f"ID:{inviter_chan.id}"
-    await ctx.bot.send_message(
-        dono.id,
-        f"📩 *Solicitação de entrada*\nCanal: {inviter_chan.title}\nGrupo: {g.name}\nLink: {link}",
+    link = f"https://t.me/{ch.username}" if ch.username else f"ID:{ch.id}"
+    await ctx.bot.send_message(dono.id,
+        f"📩 {ch.title} quer entrar no grupo *{g.name}*\nLink: {link}",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Aceitar", callback_data=f"aceitar_ext_{gid}_{uid}"),
             InlineKeyboardButton("❌ Recusar", callback_data=f"recusar_ext_{gid}_{uid}")
         ]])
     )
-    await update.callback_query.edit_message_text("✅ Solicitação enviada ao dono do grupo.")
+    await update.callback_query.edit_message_text("✅ Solicitação enviada ao dono.")
 
-# 9️⃣ Aceitar ou recusar convite
+# 9️⃣ Resposta
 async def handle_ext_response(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     action, gid, cid = update.callback_query.data.split("_")[1:]
@@ -171,45 +174,53 @@ async def handle_ext_response(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sess.add(GroupChannel(group_id=gid, channel_id=cid, accepted=True))
         sess.commit()
         await update.callback_query.edit_message_text("✅ Canal aceito.")
-        await ctx.bot.send_message(cid, f"✅ Seu canal foi aceito no grupo `{sess.get(Group, gid).name}`.")
+        await ctx.bot.send_message(cid, f"✅ Seu canal foi aceito no grupo *{sess.get(Group, gid).name}*")
     else:
         await update.callback_query.edit_message_text("❌ Solicitação recusada.")
 
-# 🔟 Texto recebido (usado na criação de grupo)
+# 🔟 Texto do grupo
 async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
     uid = update.effective_user.id
-    sess = Session()
     state = user_states.get(uid)
     if state and state.get("state") == "awaiting_group_name":
-        name = update.message.text.strip()
-        sess.add(Group(name=name, owner_id=uid)); sess.commit()
-        await update.message.reply_text(f"✅ Grupo *{name}* criado com sucesso!", parse_mode="Markdown")
-        user_states.pop(uid, None)
+        nome = update.message.text.strip()
+        Session().add(Group(name=nome, owner_id=uid))
+        Session().commit()
+        await update.message.reply_text(f"✅ Grupo *{nome}* criado!", parse_mode="Markdown")
+        user_states.pop(uid)
 
-# 🔁 Replicação de mensagens entre canais
+# 🔁 Replicar posts
 async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg:
         return
     sess = Session()
-    targets = sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all()
-    for gc in targets:
-        group = sess.get(Group, gc.group_id)
-        for target_gc in group.channels:
-            if target_gc.accepted and target_gc.channel_id != msg.chat.id:
-                await forward(msg.chat.id, target_gc.channel_id, msg.message_id)
+    for gc in sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all():
+        grp = sess.get(Group, gc.group_id)
+        for tgt in grp.channels:
+            if tgt.accepted and tgt.channel_id != msg.chat.id:
+                await forward(msg.chat.id, tgt.channel_id, msg.message_id)
 
-# 🔁 Callback router
+# 🔂 Roteador
 async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = update.callback_query.data
-    logger.info("CB: %s", data)
-    if data == "start": return await start(update, ctx)
-    if data == "menu_ajuda": return await menu_ajuda(update, ctx)
-    if data == "criar_grupo": return await menu_criar_grupo(update, ctx)
-    if data == "menu_meus_grupos": return await menu_meus_grupos(update, ctx)
-    if data == "explorar_grupos": return await explorar_grupos(update, ctx)
-    if data.startswith("vergrp_"): return await ver_grupo(update, ctx)
-    if data.startswith("solicit_"): return await solicitar_entrada(update, ctx)
-    if data.startswith(("aceitar_ext_", "recusar_ext_")): return await handle_ext_response(update, ctx)
+    logger.info("Callback: %s", data)
+    routes = {
+        "start": start, "menu_ajuda": menu_ajuda,
+        "criar_grupo": menu_criar_grupo,
+        "menu_meus_grupos": menu_meus_grupos,
+        "explorar_grupos": explorar_grupos
+    }
+    for prefix, fn in routes.items():
+        if data == prefix:
+            return await fn(update, ctx)
+    if data.startswith("gerenciar_"):
+        return await menu_meus_grupos(update, ctx)
+    if data.startswith("vergrp_"):
+        return await ver_grupo(update, ctx)
+    if data.startswith("solicit_"):
+        return await solicitar_entrada(update, ctx)
+    if data.startswith(("aceitar_ext_", "recusar_ext_")):
+        return await handle_ext_response(update, ctx)
