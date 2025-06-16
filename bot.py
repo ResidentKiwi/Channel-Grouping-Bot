@@ -1,4 +1,5 @@
-import os, logging
+import os
+import logging
 from fastapi import FastAPI, Request
 from telegram import Update, Bot
 from telegram.ext import (
@@ -15,10 +16,11 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+PORT = int(os.getenv("PORT", 10000))
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
 
-# Registrar handlers
+# Handlers
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
@@ -30,15 +32,15 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def startup():
-    logger.info("🔄 Inicializando bot...")
+    logger.info("Inicializando bot...")
     await bot_app.initialize()
     await telegram_bot.delete_webhook()
     await telegram_bot.set_webhook(WEBHOOK_URL)
-    logger.info("✅ Webhook configurado!")
+    logger.info("Webhook configurado com sucesso!")
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    logger.info("📨 Webhook recebido")
+    logger.info("Webhook update received")
     update = Update.de_json(await request.json(), bot_app.bot)
     await bot_app.process_update(update)
     return {"ok": True}
@@ -46,3 +48,9 @@ async def webhook(request: Request):
 @app.get("/")
 async def root():
     return {"status": "Bot ativo"}
+
+# ✅ Execução local (opcional)
+if __name__ == "__main__":
+    import uvicorn
+    logger.info("Iniciando localmente com uvicorn")
+    uvicorn.run("bot:app", host="0.0.0.0", port=PORT, reload=True)
