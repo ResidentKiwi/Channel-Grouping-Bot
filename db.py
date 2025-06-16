@@ -3,7 +3,6 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 engine = create_engine(DATABASE_URL, connect_args={"sslmode": "require"})
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
@@ -35,10 +34,10 @@ class GroupChannel(Base):
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     channel_id = Column(BigInteger, ForeignKey("channels.id"))
-    inviter_id = Column(BigInteger, ForeignKey("users.id"))
+    inviter_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     accepted = Column(Boolean, default=None)
     group = relationship("Group", back_populates="channels")
     channel = relationship("Channel")
-    inviter = relationship("User", foreign_keys=[inviter_id])
+    inviter = relationship("User")
 
 Base.metadata.create_all(engine)
