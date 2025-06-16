@@ -18,7 +18,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
 
-# Handlers
+# Registrar handlers
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
@@ -30,15 +30,15 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def startup():
-    logger.info("Inicializando bot...")
+    logger.info("🔄 Inicializando bot...")
     await bot_app.initialize()
     await telegram_bot.delete_webhook()
     await telegram_bot.set_webhook(WEBHOOK_URL)
-    logger.info("Webhook configurado com sucesso!")
+    logger.info("✅ Webhook configurado!")
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    logger.info("Webhook update received")
+    logger.info("📨 Webhook recebido")
     update = Update.de_json(await request.json(), bot_app.bot)
     await bot_app.process_update(update)
     return {"ok": True}
