@@ -2,7 +2,7 @@ import os, logging
 from fastapi import FastAPI, Request
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from handlers import start, new_post, handle_callback_query, handle_text_message
+from handlers import channel_authenticate, start, new_post, handle_callback_query, handle_text_message
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +15,7 @@ assert WEBHOOK_URL, "WEBHOOK_URL não definido"
 bot_app = ApplicationBuilder().token(TOKEN).build()
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
+bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, channel_authenticate))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, new_post))
 
@@ -31,14 +32,10 @@ async def startup():
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    try:
-        logger.info("Webhook update received")
-        update = Update.de_json(await request.json(), bot_app.bot)
-        await bot_app.process_update(update)
-        return {"ok": True}
-    except Exception as e:
-        logger.exception("Erro ao processar webhook")
-        return {"ok": False, "error": str(e)}
+    logger.info("Webhook update received")
+    update = Update.de_json(await request.json(), bot_app.bot)
+    await bot_app.process_update(update)
+    return {"ok": True}
 
 @app.get("/")
 async def root():
