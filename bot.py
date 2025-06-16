@@ -27,7 +27,7 @@ async def startup():
     await bot_app.initialize()
     await telegram_bot.delete_webhook()
     await telegram_bot.set_webhook(WEBHOOK_URL)
-    logger.info("Webhook configurado")
+    logger.info("Webhook configurado com sucesso!")
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -37,7 +37,7 @@ async def webhook(request: Request):
         await bot_app.process_update(update)
         return {"ok": True}
     except Exception as e:
-        logger.exception("Erro ao processar atualização")
+        logger.exception("Erro ao processar webhook")
         return {"ok": False, "error": str(e)}
 
 @app.get("/")
