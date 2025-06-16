@@ -3,46 +3,38 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 engine = create_engine(DATABASE_URL, connect_args={"sslmode": "require"})
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(BigInteger, primary_key=True)  # ID do Telegram
+    id = Column(BigInteger, primary_key=True)
     username = Column(String)
-
-    channels = relationship("Channel", back_populates="owner")
-    groups = relationship("Group", back_populates="owner")
 
 class Channel(Base):
     __tablename__ = "channels"
-    id = Column(BigInteger, primary_key=True)  # ID do canal no Telegram
+    id = Column(BigInteger, primary_key=True)
     owner_id = Column(BigInteger, ForeignKey("users.id"))
     username = Column(String)
     title = Column(String)
-
-    owner = relationship("User", back_populates="channels")
-    group_links = relationship("GroupChannel", back_populates="channel")
+    owner = relationship("User")
 
 class Group(Base):
     __tablename__ = "groups"
     id = Column(Integer, primary_key=True)
     name = Column(String)
     owner_id = Column(BigInteger, ForeignKey("users.id"))
-
-    owner = relationship("User", back_populates="groups")
-    channels = relationship("GroupChannel", back_populates="group", cascade="all, delete-orphan")
+    owner = relationship("User")
+    channels = relationship("GroupChannel", back_populates="group")
 
 class GroupChannel(Base):
     __tablename__ = "group_channels"
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     channel_id = Column(BigInteger, ForeignKey("channels.id"))
-    accepted = Column(Boolean, default=False)
-
+    accepted = Column(Boolean, default=None)
     group = relationship("Group", back_populates="channels")
-    channel = relationship("Channel", back_populates="group_links")
+    channel = relationship("Channel")
 
 Base.metadata.create_all(engine)
