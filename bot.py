@@ -1,10 +1,19 @@
 import os, logging
 from fastapi import FastAPI, Request
-from telegram import Bot, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram import Update, Bot
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+)
 from handlers import (
-    start, channel_authenticate, new_post,
-    handle_callback_query, handle_text_message
+    start,
+    channel_authenticate,
+    new_post,
+    handle_callback_query,
+    handle_text_message,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +24,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", "10000"))
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
+
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
@@ -44,5 +54,5 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info("🚀 Executando localmente")
+    logger.info("🚀 Rodando localmente")
     uvicorn.run("bot:app", host="0.0.0.0", port=PORT, reload=True)
