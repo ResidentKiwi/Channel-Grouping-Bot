@@ -1,3 +1,4 @@
+# bot.py
 import os, logging
 from fastapi import FastAPI, Request
 from telegram import Update, Bot
@@ -19,13 +20,18 @@ PORT = int(os.getenv("PORT", "10000"))
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
 
-# Registra comandos e handlers
+# ✅ Handler combinado para mensagens de canal
+async def handle_channel_post(update: Update, ctx):
+    await channel_authenticate(update, ctx)
+    await new_post(update, ctx)
+
+# 📌 Registra comandos e handlers
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
-bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, channel_authenticate))
-bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, new_post))
+bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, handle_channel_post))
 
+# 🔧 FastAPI app
 telegram_bot = Bot(TOKEN)
 app = FastAPI()
 
