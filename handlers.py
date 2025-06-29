@@ -1,4 +1,3 @@
-# handlers.py
 import re, logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -18,28 +17,23 @@ def safe_edit(q, text, markup=None):
             return
         logger.error("safe_edit error: %s", e)
 
-# 1️⃣ Autenticar canal ao postar (bot deve ser admin no canal)
+# 1️⃣ Autenticar canal automaticamente
 async def channel_authenticate(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg or msg.chat.type != "channel":
         return
-
     sess = Session()
     try:
-        # Obter os administradores do canal
         admins = await ctx.bot.get_chat_administrators(msg.chat.id)
         creator = next((a.user for a in admins if a.status == "creator" and not a.user.is_bot), None)
         if not creator:
-            logger.warning("Canal %s não possui um criador válido.", msg.chat.id)
+            logger.warning("Canal %s sem criador válido", msg.chat.id)
             return
     except Exception as e:
         logger.error("Erro ao obter admins do canal %s: %s", msg.chat.id, e)
         return
 
-    # Garante que o dono também exista na tabela de usuários
     sess.merge(User(id=creator.id, username=creator.username or ""))
-
-    # Cria ou atualiza o canal no banco
     canal = sess.get(Channel, msg.chat.id)
     if not canal:
         canal = Channel(
@@ -53,11 +47,10 @@ async def channel_authenticate(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         canal.owner_id = creator.id
         canal.authenticated = True
-
     sess.commit()
     logger.info("✅ Canal autenticado: %s (%s)", msg.chat.title, msg.chat.id)
 
-# 2️⃣ Comando /start ou botão "start"
+# 2️⃣ Menu /start
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     sess = Session()
@@ -99,67 +92,63 @@ async def menu_ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "• Remover canais ou apagar grupos\n"
         "• Sair de grupo (se seu canal participa)\n"
         "• Replicação automática de posts entre canais do grupo\n\n"
-        "➡️ Qualquer dúvida, envie /start"
+        "➡️ Use /start a qualquer momento para retornar aqui."
     )
-    await safe_edit(update.callback_query, txt, InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+    await safe_edit(update.callback_query, txt,
+                    InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
 
-# 4️⃣ Opção apagar grupo
+# 4️⃣ Criar grupo
 async def menu_criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     user_states[uid] = {"state": "awaiting_group_name"}
-    await safe_edit(update.callback_query, "📌 Digite o nome do novo grupo:", InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancelar", callback_data="start")]]))
+    await safe_edit(update.callback_query, "📌 Digite o nome do novo grupo:",
+                    InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancelar", callback_data="start")]]))
 
-
-# 5️⃣ Processar texto (criação de grupo ou convite de canal)
+# 5️⃣ Processar texto (criação ou convite)
 async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-
     uid = update.effective_user.id
     text = update.message.text.strip()
     state = user_states.get(uid)
     sess = Session()
 
-    # 🆕 Criar grupo
+    # criar grupo
     if state and state.get("state") == "awaiting_group_name":
         name = text
         sess.add(Group(name=name, owner_id=uid))
         sess.commit()
         await update.message.reply_text(f"✅ Grupo *{name}* criado!", parse_mode="Markdown")
         user_states.pop(uid)
+        return
 
-    # ➕ Convidar canal por @username ou link
+    # convite de canal
     elif state and state.get("state") == "awaiting_channel_invite":
         match = re.search(r"@([\w\d_]+)", text) or re.search(r"t\.me/([\w\d_]+)", text)
         if not match:
-            return await update.message.reply_text("❌ Envie um @username ou link t.me válido.")
-
+            await update.message.reply_text("❌ Envie um @username ou link t.me válido.")
+            return
         username = match.group(1)
 
-        # 🔍 Tenta buscar canal autenticado previamente no banco
         existing = sess.query(Channel).filter_by(username=username).first()
-
         if existing:
             chat_id = existing.id
             chat_title = existing.title
-            is_owner = existing.owner_id == uid
+            is_owner = (existing.owner_id == uid)
         else:
-            # 🧪 Tenta buscar remotamente pelo Telegram
             try:
                 chat = await ctx.bot.get_chat(f"@{username}")
                 if chat.type != "channel":
-                    return await update.message.reply_text("❌ Esse usuário não é um canal.")
-
+                    await update.message.reply_text("❌ Esse usuário não é um canal.")
+                    return
                 chat_id = chat.id
                 chat_title = chat.title or username
-
                 try:
                     admins = await ctx.bot.get_chat_administrators(chat.id)
                     owner = next((a.user for a in admins if a.status == "creator"), None)
-                except Exception:
+                except:
                     owner = None
-
                 sess.merge(Channel(
                     id=chat.id,
                     owner_id=owner.id if owner else None,
@@ -167,18 +156,22 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     title=chat_title,
                     authenticated=False
                 ))
-                is_owner = owner and owner.id == uid
-
+                is_owner = (owner and owner.id == uid)
             except Forbidden:
-                return await update.message.reply_text("❌ Bot não tem permissão para acessar esse canal. Verifique se ele é admin.")
+                await update.message.reply_text("❌ Bot não é admin ou não tem permissão no canal.")
+                return
             except BadRequest as e:
-                return await update.message.reply_text(f"❌ Canal não encontrado: {e.message}")
+                await update.message.reply_text(f"❌ Canal não encontrado: {e.message}")
+                return
             except Exception as e:
-                return await update.message.reply_text(f"❌ Erro inesperado: {e}")
+                await update.message.reply_text(f"❌ Erro inesperado: {e}")
+                return
 
-        # 📨 Criar relação no grupo
         gid = state["group_id"]
-        if not sess.query(GroupChannel).filter_by(group_id=gid, channel_id=chat_id).first():
+        already = sess.query(GroupChannel).filter_by(group_id=gid, channel_id=chat_id).first()
+        if already:
+            await update.message.reply_text("⚠️ Este canal já foi convidado ou adicionado.")
+        else:
             sess.add(GroupChannel(
                 group_id=gid,
                 channel_id=chat_id,
@@ -186,53 +179,54 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 accepted=True if is_owner else None
             ))
             sess.commit()
-
-        await update.message.reply_text(
-            "✅ Canal adicionado automaticamente ao grupo!" if is_owner else
-            f"✅ Convite enviado ao canal *{chat_title}*! Agora ele precisa aceitar.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("↩️ Voltar", callback_data="start")]
-            ])
-        )
+            if is_owner:
+                await update.message.reply_text("✅ Canal adicionado automaticamente ao grupo!")
+            else:
+                await update.message.reply_text(
+                    f"✅ Convite enviado ao canal *{chat_title}*! Agora ele precisa aceitar.",
+                    parse_mode="Markdown"
+                )
         user_states.pop(uid)
 
-
-# 6️⃣ Menu Meus Canais
+# 6️⃣ Meus canais
 async def menu_meus_canais(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     sess = Session()
     chans = sess.query(Channel).filter_by(owner_id=uid).all()
     if not chans:
-        return await safe_edit(update.callback_query,
-                               "🚫 Você não tem canais autenticados.",
-                               InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        await safe_edit(update.callback_query,
+                        "🚫 Você não tem canais autenticados.",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        return
     text = "📋 *Seus canais:*"
     for c in chans:
         link = f"https://t.me/{c.username}" if c.username else str(c.id)
         text += f"\n• {c.title} — {link}"
-    await safe_edit(update.callback_query, text, InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+    await safe_edit(update.callback_query, text,
+                    InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
 
-# 7️⃣ Menu Meus Grupos (proprietário)
+# 7️⃣ Meus grupos (proprietário)
 async def menu_meus_grupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     sess = Session()
     grps = sess.query(Group).filter_by(owner_id=uid).all()
     if not grps:
-        return await safe_edit(update.callback_query,
-                               "🚫 Você ainda não criou nenhum grupo.",
-                               InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        await safe_edit(update.callback_query,
+                        "🚫 Você ainda não criou nenhum grupo.",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        return
     kb = [[InlineKeyboardButton(g.name, callback_data=f"gerenciar_{g.id}")] for g in grps]
     kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="start")])
     await safe_edit(update.callback_query, "📂 Seus grupos:", InlineKeyboardMarkup(kb))
 
-# 8️⃣ Menu Gerenciar Grupo
+# 8️⃣ Gerenciar grupo (lista canais)
 async def gerenciar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     gid = int(update.callback_query.data.split("_", 1)[1])
-    sess = Session(); g = sess.get(Group, gid)
+    sess = Session()
+    g = sess.get(Group, gid)
     parts = sess.query(GroupChannel).filter_by(group_id=gid, accepted=True).all()
 
     text = f"🎯 *{g.name}*\n\n📢 Canais participantes:"
@@ -252,7 +246,7 @@ async def gerenciar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ]
     await safe_edit(update.callback_query, text, InlineKeyboardMarkup(kb))
 
-# 9️⃣ Convidar canal (modo texto)
+# 9️⃣ Convidar canal (via texto)
 async def convite_manual(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     gid = int(update.callback_query.data.split("_", 1)[1])
@@ -261,48 +255,52 @@ async def convite_manual(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "📥 Envie @username ou link do canal:",
                     InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data=f"gerenciar_{gid}")]]))
 
-# 🔟 Aceitar/Recusar Convite Interno
+# 🔟 Aceitar/Recusar convite interno
 async def handle_convite_response(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     parts = update.callback_query.data.split("_")
-    # convite_123 => chama convite_manual
     if parts[0] == "convite" and len(parts) == 2:
         return await convite_manual(update, ctx)
-
-    # aceitar_12345_6789 ou recusar_...
+    if len(parts) != 4:
+        return await update.callback_query.answer("❌ Callback inválido", show_alert=True)
     _, action, gid, cid = parts
     gid, cid = int(gid), int(cid)
     sess = Session()
     gc = sess.query(GroupChannel).filter_by(group_id=gid, channel_id=cid).first()
     if not gc:
-        return await safe_edit(update.callback_query, "❌ Convite inválido.")
-    ch = sess.get(Channel, cid); g = sess.get(Group, gid)
+        await safe_edit(update.callback_query, "❌ Convite inválido.")
+        return
+    ch = sess.get(Channel, cid)
+    g = sess.get(Group, gid)
 
     if action == "aceitar":
-        gc.accepted = True; sess.commit()
+        gc.accepted = True
+        sess.commit()
         await safe_edit(update.callback_query, f"✅ Canal *{ch.title}* aceitou convite.")
     else:
-        sess.delete(gc); sess.commit()
+        sess.delete(gc)
+        sess.commit()
         await safe_edit(update.callback_query, f"❌ Canal *{ch.title}* recusou convite.")
 
-    # notificando o dono
     try:
-        await ctx.bot.send_message(g.owner_id,
-                                   f"📥 Canal *{ch.title}* "
-                                   f"{'aceitou' if action=='aceitar' else 'recusou'} convite "
-                                   f"no grupo *{g.name}*")
+        await ctx.bot.send_message(
+            g.owner_id,
+            f"📥 Canal *{ch.title}* {'aceitou' if action=='aceitar' else 'recusou'} convite no grupo *{g.name}*",
+            parse_mode="Markdown"
+        )
     except Exception:
         logger.error("Erro ao notificar dono do grupo")
 
-# ✅ Explorar grupos públicos
+# 1️⃣1️⃣ Explorar grupos públicos
 async def explorar_grupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     sess = Session()
     grps = sess.query(Group).all()
     if not grps:
-        return await safe_edit(update.callback_query,
-                               "🌍 Ainda não há grupos públicos.",
-                               InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        await safe_edit(update.callback_query,
+                        "🌍 Ainda não há grupos públicos.",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        return
     kb = [
         [InlineKeyboardButton(f"{g.name} ({sess.query(GroupChannel).filter_by(group_id=g.id,accepted=True).count()})",
                               callback_data=f"vergrp_{g.id}")]
@@ -311,36 +309,44 @@ async def explorar_grupos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="start")])
     await safe_edit(update.callback_query, "🌐 Grupos públicos:", InlineKeyboardMarkup(kb))
 
-# 1️⃣1️⃣ Visualizar grupo público
+# 1️⃣2️⃣ Visualizar grupo público
 async def ver_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     gid = int(update.callback_query.data.split("_", 1)[1])
-    sess = Session(); g = sess.get(Group, gid)
+    sess = Session()
+    g = sess.get(Group, gid)
     parts = sess.query(GroupChannel).filter_by(group_id=gid, accepted=True).all()
     text = f"📁 *{g.name}*\nCanais:"
     for gc in parts:
         ch = sess.get(Channel, gc.channel_id)
-        subs = await ctx.bot.get_chat_member_count(ch.id) if ch.username else "?"
+        try:
+            subs = await ctx.bot.get_chat_member_count(ch.id)
+        except:
+            subs = "?"
         link = f"https://t.me/{ch.username}" if ch.username else str(ch.id)
         text += f"\n- [{ch.title}]({link}) — {subs}"
-    await safe_edit(update.callback_query, text, InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Solicitar entrada", callback_data=f"solicit_{gid}")],
-        [InlineKeyboardButton("↩️ Voltar", callback_data="explorar_grupos")]
-    ]))
+    await safe_edit(update.callback_query, text,
+                    InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📩 Solicitar entrada", callback_data=f"solicit_{gid}")],
+                        [InlineKeyboardButton("↩️ Voltar", callback_data="explorar_grupos")]
+                    ]))
 
-# 1️⃣2️⃣ Solicitar entrada externa
+# 1️⃣3️⃣ Solicitar entrada externa
 async def solicitar_entrada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     gid = int(update.callback_query.data.split("_", 1)[1])
     sess = Session()
     if sess.query(GroupChannel).filter_by(group_id=gid, channel_id=uid).first():
-        return await safe_edit(update.callback_query, "🚫 Já está no grupo ou já solicitou.")
+        await safe_edit(update.callback_query, "🚫 Já está no grupo ou já solicitou.")
+        return
     ch = sess.get(Channel, uid)
     if not ch or not ch.authenticated:
-        return await safe_edit(update.callback_query, "❌ Seu canal não está autenticado.")
+        await safe_edit(update.callback_query, "❌ Seu canal não está autenticado.")
+        return
     sess.add(GroupChannel(group_id=gid, channel_id=uid, inviter_id=uid, accepted=None))
-    sess.commit(); g = sess.get(Group, gid)
+    sess.commit()
+    g = sess.get(Group, gid)
     try:
         await ctx.bot.send_message(
             g.owner_id,
@@ -353,47 +359,57 @@ async def solicitar_entrada(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     except:
         logger.error("Erro ao notificar dono do grupo")
-
     await safe_edit(update.callback_query, "✅ Solicitação enviada ao dono.")
 
-# 1️⃣3️⃣ Responder solicitação externa
+# 1️⃣4️⃣ Responder solicitação externa
 async def handle_ext_response(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     parts = update.callback_query.data.split("_")
     if len(parts) != 4:
-        return await update.callback_query.answer("⚠️ Formato incorreto.", show_alert=True)
+        await update.callback_query.answer("⚠️ Callback inválido.", show_alert=True)
+        return
     _, action, gid, cid = parts
     gid, cid = int(gid), int(cid)
     sess = Session()
     gc = sess.query(GroupChannel).filter_by(group_id=gid, channel_id=cid).first()
-    ch = sess.get(Channel, cid); g = sess.get(Group, gid)
+    if not gc:
+        await safe_edit(update.callback_query, "⚠️ Solicitação inválida.")
+        return
+    ch = sess.get(Channel, cid)
+    g = sess.get(Group, gid)
 
     if action == "aceitar_ext":
-        gc.accepted = True; sess.commit()
+        gc.accepted = True
+        sess.commit()
         await safe_edit(update.callback_query, "✅ Canal aceito no grupo.")
         msg = f"✅ Seu canal foi aceito no grupo *{g.name}*"
     else:
-        sess.delete(gc); sess.commit()
+        sess.delete(gc)
+        sess.commit()
         await safe_edit(update.callback_query, "❌ Solicitação recusada.")
         msg = f"❌ Seu canal foi recusado no grupo *{g.name}*"
     try:
-        await ctx.bot.send_message(cid, msg)
+        await ctx.bot.send_message(cid, msg, parse_mode="Markdown")
     except:
         logger.error("Não foi possível notificar o canal")
 
-# 1️⃣4️⃣ Remover canal do grupo
+# 1️⃣5️⃣ Remover canal do grupo
 async def remocao_canal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     gid = int(update.callback_query.data.split("_", 1)[1])
     sess = Session()
     chans = sess.query(GroupChannel).filter_by(group_id=gid, accepted=True).all()
     if not chans:
-        return await safe_edit(update.callback_query, "🚫 Sem canais para remover.", InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data=f"gerenciar_{gid}")]]))
-    kb = [[InlineKeyboardButton(sess.get(Channel, gc.channel_id).title, callback_data=f"remover_confirm_{gid}_{gc.channel_id}")] for gc in chans]
+        await safe_edit(update.callback_query,
+                        "🚫 Sem canais para remover.",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data=f"gerenciar_{gid}")]]))
+        return
+    kb = [[InlineKeyboardButton(sess.get(Channel, gc.channel_id).title,
+                                callback_data=f"remover_confirm_{gid}_{gc.channel_id}")] for gc in chans]
     kb.append([InlineKeyboardButton("↩️ Voltar", callback_data=f"gerenciar_{gid}")])
     await safe_edit(update.callback_query, "Escolha canal para remover:", InlineKeyboardMarkup(kb))
 
-# 1️⃣5️⃣ Confirmar remoção
+# 1️⃣6️⃣ Confirmar remoção
 async def remover_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     _, _, gid, cid = update.callback_query.data.split("_")
@@ -403,14 +419,16 @@ async def remover_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sess.commit()
     return await gerenciar_grupo(update, ctx)
 
-# 1️⃣6️⃣ Apagar grupo
+# 1️⃣7️⃣ Apagar grupo
 async def prompt_delete_group(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     gid = int(update.callback_query.data.split("_", 1)[1])
-    await safe_edit(update.callback_query, "⚠️ Confirmar exclusão do grupo?", InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Sim", callback_data=f"delete_confirm_{gid}")],
-        [InlineKeyboardButton("❌ Não", callback_data=f"gerenciar_{gid}")]
-    ]))
+    await safe_edit(update.callback_query,
+                    "⚠️ Confirmar exclusão do grupo?",
+                    InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✅ Sim", callback_data=f"delete_confirm_{gid}")],
+                        [InlineKeyboardButton("❌ Não", callback_data=f"gerenciar_{gid}")]
+                    ]))
 
 async def delete_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
@@ -420,61 +438,49 @@ async def delete_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     sess.query(Group).filter_by(id=gid).delete()
     sess.commit()
     return await menu_meus_grupos(update, ctx)
-
-# 1️⃣7️⃣ Sair de grupo (canal participante)
+# 1️⃣8️⃣ Sair de grupo (canal participante)
 async def menu_sair_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     uid = update.callback_query.from_user.id
     sess = Session()
     chans = sess.query(GroupChannel).filter_by(channel_id=uid, accepted=True).all()
     if not chans:
-        return await safe_edit(update.callback_query, "🚫 Você não participa de nenhum grupo.",
-                               InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
-    kb = [[InlineKeyboardButton(sess.get(Group, gc.group_id).name, callback_data=f"sair_confirm_{gc.group_id}_{uid}")] for gc in chans]
+        await safe_edit(update.callback_query,
+                        "🚫 Você não participa de nenhum grupo.",
+                        InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+        return
+    kb = [[InlineKeyboardButton(sess.get(Group, gc.group_id).name,
+                                callback_data=f"sair_confirm_{gc.group_id}_{uid}")]
+          for gc in chans]
     kb.append([InlineKeyboardButton("↩️ Voltar", callback_data="start")])
-    await safe_edit(update.callback_query, "Selecione o grupo para sair:", InlineKeyboardMarkup(kb))
+    await safe_edit(update.callback_query, "Escolha o grupo para sair:", InlineKeyboardMarkup(kb))
 
 async def sair_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     _, _, gid, cid = update.callback_query.data.split("_")
+    gid, cid = int(gid), int(cid)
     sess = Session()
-    sess.query(GroupChannel).filter_by(group_id=int(gid), channel_id=int(cid)).delete()
+    sess.query(GroupChannel).filter_by(group_id=gid, channel_id=cid).delete()
     sess.commit()
     return await menu_sair_grupo(update, ctx)
 
-# 1️⃣8️⃣ Replicar posts entre canais do grupo
+# 1️⃣9️⃣ Replicar posts entre canais
 async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg:
         return
-
     sess = Session()
     gcs = sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all()
-
-    if not gcs:
-        logger.info("📭 Nenhum grupo ativo para o canal %s", msg.chat.id)
-        return
-
-    logger.info("📨 Nova mensagem em canal %s (%s)", msg.chat.title, msg.chat.id)
-
     for gc in gcs:
-        grupo = sess.get(Group, gc.group_id)
-        if not grupo:
-            continue
-
-        for target in grupo.channels:
-            if target.accepted and target.channel_id != msg.chat.id:
+        grp = sess.get(Group, gc.group_id)
+        for tgt in grp.channels:
+            if tgt.accepted and tgt.channel_id != msg.chat.id:
                 try:
-                    await ctx.bot.forward_message(
-                        chat_id=target.channel_id,
-                        from_chat_id=msg.chat.id,
-                        message_id=msg.message_id
-                    )
-                    logger.info("📤 Post encaminhado de %s → %s", msg.chat.id, target.channel_id)
+                    await forward(msg.chat.id, tgt.channel_id, msg.message_id)
                 except Exception as e:
-                    logger.error("❌ Erro ao encaminhar para %s: %s", target.channel_id, e)
+                    logger.error("Erro replicando post para canal %s: %s", tgt.channel_id, e)
 
-# Centralizador de callbacks
+# 2️⃣0️⃣ Central de callbacks
 async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = update.callback_query.data or ""
     logger.info("Callback recebido: %s", data)
@@ -488,19 +494,23 @@ async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await simple[data](update, ctx)
 
     prefix = data.split("_", 1)[0]
-
-    if prefix in ("convite", "aceitar", "recusar"):
-        return await handle_convite_response(update, ctx)
+    if prefix == "convite":
+        parts = data.split("_")
+        if len(parts) == 2:
+            return await convite_manual(update, ctx)
+        else:
+            return await handle_convite_response(update, ctx)
 
     routes = {
-        "gerenciar": gerenciar_grupo, "vergrp": ver_grupo, "solicit": solicitar_entrada,
-        "aceitar_ext": handle_ext_response, "recusar_ext": handle_ext_response,
-        "remover": remocao_canal, "remover_confirm": remover_confirm,
-        "delete": prompt_delete_group, "delete_confirm": delete_confirm,
-        "sair_confirm": sair_confirm
+        "gerenciar": gerenciar_grupo, "aceitar": handle_convite_response,
+        "recusar": handle_convite_response, "vergrp": ver_grupo,
+        "solicit": solicitar_entrada, "aceitar_ext": handle_ext_response,
+        "recusar_ext": handle_ext_response, "remover": remocao_canal,
+        "remover_confirm": remover_confirm, "delete": prompt_delete_group,
+        "delete_confirm": delete_confirm, "sair_confirm": sair_confirm
     }
-    fn = routes.get(prefix)
-    if fn:
-        return await fn(update, ctx)
+    if prefix in routes:
+        return await routes[prefix](update, ctx)
 
     await update.callback_query.answer("❌ Ação desconhecida.", show_alert=True)
+            
