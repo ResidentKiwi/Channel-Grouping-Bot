@@ -23,22 +23,37 @@ async def channel_authenticate(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg or msg.chat.type != "channel":
         return
+
     sess = Session()
     try:
+        # Obter os administradores do canal
         admins = await ctx.bot.get_chat_administrators(msg.chat.id)
-        creator = next(a.user for a in admins if a.status == "creator" and not a.user.is_bot)
+        creator = next((a.user for a in admins if a.status == "creator" and not a.user.is_bot), None)
+        if not creator:
+            logger.warning("Canal %s não possui um criador válido.", msg.chat.id)
+            return
     except Exception as e:
         logger.error("Erro ao obter admins do canal %s: %s", msg.chat.id, e)
         return
+
+    # Garante que o dono também exista na tabela de usuários
     sess.merge(User(id=creator.id, username=creator.username or ""))
-    ch = sess.get(Channel, msg.chat.id)
-    if not ch:
-        sess.add(Channel(id=msg.chat.id, owner_id=creator.id,
-                         username=msg.chat.username or "", title=msg.chat.title or "",
-                         authenticated=True))
+
+    # Cria ou atualiza o canal no banco
+    canal = sess.get(Channel, msg.chat.id)
+    if not canal:
+        canal = Channel(
+            id=msg.chat.id,
+            owner_id=creator.id,
+            username=msg.chat.username or "",
+            title=msg.chat.title or "",
+            authenticated=True
+        )
+        sess.add(canal)
     else:
-        ch.owner_id = creator.id
-        ch.authenticated = True
+        canal.owner_id = creator.id
+        canal.authenticated = True
+
     sess.commit()
     logger.info("✅ Canal autenticado: %s (%s)", msg.chat.title, msg.chat.id)
 
