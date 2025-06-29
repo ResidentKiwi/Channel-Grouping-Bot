@@ -320,7 +320,7 @@ async def ver_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = f"📁 *{g.name}*\nCanais:"
     for gc in parts:
         ch = sess.get(Channel, gc.channel_id)
-        subs = await ctx.bot.get_chat_members_count(ch.id) if ch.username else "?"
+        subs = await ctx.bot.get_chat_member_count(ch.id) if ch.username else "?"
         link = f"https://t.me/{ch.username}" if ch.username else str(ch.id)
         text += f"\n- [{ch.title}]({link}) — {subs}"
     await safe_edit(update.callback_query, text, InlineKeyboardMarkup([
