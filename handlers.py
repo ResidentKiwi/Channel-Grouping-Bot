@@ -428,4 +428,14 @@ async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await handle_convite_response(update, ctx)
 
     routes = {
-   
+        "gerenciar": gerenciar_grupo, "vergrp": ver_grupo, "solicit": solicitar_entrada,
+        "aceitar_ext": handle_ext_response, "recusar_ext": handle_ext_response,
+        "remover": remocao_canal, "remover_confirm": remover_confirm,
+        "delete": prompt_delete_group, "delete_confirm": delete_confirm,
+        "sair_confirm": sair_confirm
+    }
+    fn = routes.get(prefix)
+    if fn:
+        return await fn(update, ctx)
+
+    await update.callback_query.answer("❌ Ação desconhecida.", show_alert=True)
