@@ -98,13 +98,16 @@ async def menu_criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await safe_edit(update.callback_query, "📌 Digite o nome do novo grupo:", 
         InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancelar", callback_data="start")]]))
 
-# 5️⃣ Criar grupo por texto
+# 5️⃣ Criar grupo por texto ou convidar canal
 async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not update.message: return
+    if not update.message:
+        return
+
     uid = update.effective_user.id
     state = user_states.get(uid)
     sess = Session()
 
+    # 🆕 Criar novo grupo
     if state and state.get("state") == "awaiting_group_name":
         name = update.message.text.strip()
         sess.add(Group(name=name, owner_id=uid))
@@ -112,22 +115,38 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Grupo *{name}* criado!", parse_mode="Markdown")
         user_states.pop(uid)
 
+    # ➕ Convidar canal por @ ou link
     elif state and state.get("state") == "awaiting_channel_invite":
-        match = re.search(r"@([\w\d_]+)", update.message.text) or re.search(r"t\.me/([\w\d_]+)", update.message.text)
+        msg_text = update.message.text.strip()
+        match = re.search(r"@([\w\d_]+)", msg_text) or re.search(r"t\.me/([\w\d_]+)", msg_text)
+
         if not match:
-            return await update.message.reply_text("❌ Envie @username ou t.me/…")
+            return await update.message.reply_text("❌ Envie um @username ou link t.me válido.")
+
         username = match.group(1)
+
+        # ✅ Buscar o canal com tratamento de erros
         try:
             chat = await ctx.bot.get_chat(username)
+
             if chat.type != "channel":
-                return await update.message.reply_text("❌ Este usuário não é canal.")
+                return await update.message.reply_text("❌ Esse usuário não é um canal.")
+
+        except Forbidden:
+            return await update.message.reply_text("❌ O bot não tem permissão para acessar esse canal. Verifique se ele é admin.")
+        except BadRequest as e:
+            return await update.message.reply_text(f"❌ Canal não encontrado: {e.message}")
         except Exception as e:
-            return await update.message.reply_text(f"❌ Canal não encontrado: {e}")
+            return await update.message.reply_text(f"❌ Erro inesperado: {e}")
+
+        # ✅ Tenta buscar o dono
         try:
             admins = await ctx.bot.get_chat_administrators(chat.id)
-            owner = admins[0].user if admins else None
+            owner = next((a.user for a in admins if a.status == "creator"), None)
         except:
             owner = None
+
+        # ✅ Salva canal e convite
         sess.merge(Channel(
             id=chat.id,
             owner_id=owner.id if owner else None,
@@ -138,7 +157,13 @@ async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         gid = state["group_id"]
         sess.add(GroupChannel(group_id=gid, channel_id=chat.id, inviter_id=uid, accepted=None))
         sess.commit()
-        await update.message.reply_text("✅ Convite enviado! O canal precisa aceitar.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]]))
+
+        await update.message.reply_text(
+            "✅ Convite enviado ao canal. Agora ele precisa aceitar!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("↩️ Voltar", callback_data="start")]
+            ])
+        )
         user_states.pop(uid)
 
 # 6️⃣ Meus canais
