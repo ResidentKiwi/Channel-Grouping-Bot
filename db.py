@@ -1,9 +1,16 @@
+import os
 from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-import os
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DATABASE_URL, connect_args={"sslmode": "require"})
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"sslmode": "require"},
+    pool_pre_ping=True,       # ✅ Verifica conexão antes de usar
+    pool_recycle=1800         # ✅ Recicla conexões a cada 30 minutos
+)
+
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
