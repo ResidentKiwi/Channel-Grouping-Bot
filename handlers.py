@@ -95,95 +95,92 @@ async def menu_criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_states[uid] = {"state": "awaiting_group_name"}
     await safe_edit(update.callback_query, "📌 Digite o nome do novo grupo:", InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Cancelar", callback_data="start")]]))
 
-# 5️⃣ Processar texto (criação ou convite)
+
+# 5️⃣ Processar texto (criação de grupo ou convite de canal)
 async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
+
     uid = update.effective_user.id
+    text = update.message.text.strip()
     state = user_states.get(uid)
     sess = Session()
 
-    # Criar grupo
+    # 🆕 Criar grupo
     if state and state.get("state") == "awaiting_group_name":
-        name = update.message.text.strip()
+        name = text
         sess.add(Group(name=name, owner_id=uid))
         sess.commit()
         await update.message.reply_text(f"✅ Grupo *{name}* criado!", parse_mode="Markdown")
         user_states.pop(uid)
 
-    # Enviar convite para canal já autenticado
+    # ➕ Convidar canal por @username ou link
     elif state and state.get("state") == "awaiting_channel_invite":
-        text = update.message.text.strip()
         match = re.search(r"@([\w\d_]+)", text) or re.search(r"t\.me/([\w\d_]+)", text)
         if not match:
             return await update.message.reply_text("❌ Envie um @username ou link t.me válido.")
+
         username = match.group(1)
 
-        # 🔍 Verifica se canal já está autenticado no banco
-        ch = sess.query(Channel).filter_by(username=username.lower(), authenticated=True).first()
-        if ch:
-            is_owner = ch.owner_id == uid
-            gid = state["group_id"]
-            exists = sess.query(GroupChannel).filter_by(group_id=gid, channel_id=ch.id).first()
-            if not exists:
-                sess.add(GroupChannel(
-                    group_id=gid,
-                    channel_id=ch.id,
-                    inviter_id=uid,
-                    accepted=True if is_owner else None
+        # 🔍 Tenta buscar canal autenticado previamente no banco
+        existing = sess.query(Channel).filter_by(username=username).first()
+
+        if existing:
+            chat_id = existing.id
+            chat_title = existing.title
+            is_owner = existing.owner_id == uid
+        else:
+            # 🧪 Tenta buscar remotamente pelo Telegram
+            try:
+                chat = await ctx.bot.get_chat(f"@{username}")
+                if chat.type != "channel":
+                    return await update.message.reply_text("❌ Esse usuário não é um canal.")
+
+                chat_id = chat.id
+                chat_title = chat.title or username
+
+                try:
+                    admins = await ctx.bot.get_chat_administrators(chat.id)
+                    owner = next((a.user for a in admins if a.status == "creator"), None)
+                except Exception:
+                    owner = None
+
+                sess.merge(Channel(
+                    id=chat.id,
+                    owner_id=owner.id if owner else None,
+                    username=username,
+                    title=chat_title,
+                    authenticated=False
                 ))
-                sess.commit()
-                user_states.pop(uid)
-                return await update.message.reply_text(
-                    "✅ Canal adicionado automaticamente!" if is_owner else
-                    "✅ Convite enviado ao canal!",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]])
-                )
-            else:
-                return await update.message.reply_text("ℹ️ Esse canal já está vinculado a esse grupo.")
+                is_owner = owner and owner.id == uid
 
-        # Caso não esteja no banco, tenta buscar pelo username
-        try:
-            chat = await ctx.bot.get_chat(username)
-            if chat.type != "channel":
-                return await update.message.reply_text("❌ Esse usuário não é um canal.")
-        except Forbidden:
-            return await update.message.reply_text("❌ Bot não tem permissão para acessar esse canal. Verifique se ele é admin.")
-        except BadRequest as e:
-            return await update.message.reply_text(f"❌ Canal não encontrado: {e.message}")
-        except Exception as e:
-            return await update.message.reply_text(f"❌ Erro inesperado: {e}")
+            except Forbidden:
+                return await update.message.reply_text("❌ Bot não tem permissão para acessar esse canal. Verifique se ele é admin.")
+            except BadRequest as e:
+                return await update.message.reply_text(f"❌ Canal não encontrado: {e.message}")
+            except Exception as e:
+                return await update.message.reply_text(f"❌ Erro inesperado: {e}")
 
-        # Busca owner se conseguir acessar o canal
-        try:
-            admins = await ctx.bot.get_chat_administrators(chat.id)
-            owner = next((a.user for a in admins if a.status == "creator"), None)
-        except:
-            owner = None
-
-        # Salva canal e convite
-        sess.merge(Channel(
-            id=chat.id,
-            owner_id=owner.id if owner else None,
-            username=username,
-            title=chat.title or username,
-            authenticated=False
-        ))
+        # 📨 Criar relação no grupo
         gid = state["group_id"]
-        sess.add(GroupChannel(
-            group_id=gid,
-            channel_id=chat.id,
-            inviter_id=uid,
-            accepted=True if owner and owner.id == uid else None
-        ))
-        sess.commit()
-        user_states.pop(uid)
+        if not sess.query(GroupChannel).filter_by(group_id=gid, channel_id=chat_id).first():
+            sess.add(GroupChannel(
+                group_id=gid,
+                channel_id=chat_id,
+                inviter_id=uid,
+                accepted=True if is_owner else None
+            ))
+            sess.commit()
 
         await update.message.reply_text(
-            "✅ Canal adicionado automaticamente!" if owner and owner.id == uid else
-            "✅ Convite enviado ao canal!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]])
+            "✅ Canal adicionado automaticamente ao grupo!" if is_owner else
+            f"✅ Convite enviado ao canal *{chat_title}*! Agora ele precisa aceitar.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("↩️ Voltar", callback_data="start")]
+            ])
         )
+        user_states.pop(uid)
 
 
 # 6️⃣ Menu Meus Canais
