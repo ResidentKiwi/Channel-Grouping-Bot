@@ -19,7 +19,7 @@ PORT = int(os.getenv("PORT", "10000"))
 
 bot_app = ApplicationBuilder().token(TOKEN).build()
 
-# Registra handlers
+# Registra comandos e handlers
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
@@ -31,11 +31,11 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def startup():
-    logger.info("🔧 Inicializando bot")
+    logger.info("🔧 Inicializando bot...")
     await bot_app.initialize()
     await telegram_bot.delete_webhook()
     await telegram_bot.set_webhook(WEBHOOK_URL)
-    logger.info("✅ Webhook configurado!")
+    logger.info("✅ Webhook pronto!")
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -49,4 +49,5 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+    logger.info("🚀 Executando localmente")
     uvicorn.run("bot:app", host="0.0.0.0", port=PORT, reload=True)
