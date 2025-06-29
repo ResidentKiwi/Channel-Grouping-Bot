@@ -99,58 +99,79 @@ async def menu_criar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def handle_text_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
+
     uid = update.effective_user.id
+    text = update.message.text.strip()
     state = user_states.get(uid)
     sess = Session()
 
-    # Criar grupo
+    logger.info("📥 Mensagem recebida de %s: %s", uid, text)
+    logger.debug("🔎 Estado atual do usuário: %s", state)
+
+    # 🛠 Criar grupo
     if state and state.get("state") == "awaiting_group_name":
-        name = update.message.text.strip()
+        name = text
         sess.add(Group(name=name, owner_id=uid))
         sess.commit()
-        await update.message.reply_text(f"✅ Grupo *{name}* criado!", parse_mode="Markdown")
-        user_states.pop(uid)
+        user_states.pop(uid, None)
+        logger.info("✅ Grupo criado: %s (owner=%s)", name, uid)
+        return await update.message.reply_text(f"✅ Grupo *{name}* criado!", parse_mode="Markdown")
 
-    # Enviar convite para canal
+    # ➕ Convidar canal via @username ou link
     elif state and state.get("state") == "awaiting_channel_invite":
-        text = update.message.text.strip()
         match = re.search(r"@([\w\d_]+)", text) or re.search(r"t\.me/([\w\d_]+)", text)
         if not match:
             return await update.message.reply_text("❌ Envie um @username ou link t.me válido.")
+
         username = match.group(1)
+        logger.info("🎯 Tentando buscar canal @%s", username)
 
         try:
             chat = await ctx.bot.get_chat(username)
+            logger.debug("✅ Canal obtido: %s (%s)", chat.title, chat.id)
+
             if chat.type != "channel":
-                return await update.message.reply_text("❌ Este usuário não é um canal.")
+                return await update.message.reply_text("❌ Esse usuário não é um canal.")
         except Forbidden:
-            return await update.message.reply_text("❌ Bot não é admin no canal ou não tem permissão.")
+            logger.warning("⛔ Acesso proibido ao canal @%s — bot não é admin?", username)
+            return await update.message.reply_text("❌ Bot não tem permissão para acessar o canal. Verifique se ele é admin.")
         except BadRequest as e:
-            return await update.message.reply_text(f"❌ Canal não encontrado: {e}")
+            logger.warning("❌ Canal não encontrado @%s: %s", username, e)
+            return await update.message.reply_text(f"❌ Canal não encontrado: {e.message}")
         except Exception as e:
+            logger.exception("❌ Erro inesperado ao acessar @%s", username)
             return await update.message.reply_text(f"❌ Erro inesperado: {e}")
 
-        # Obter dono/criador do canal (opcional)
-        owner = None
+        # Buscar dono do canal
         try:
             admins = await ctx.bot.get_chat_administrators(chat.id)
             owner = next((a.user for a in admins if a.status == "creator"), None)
-        except:
+            logger.debug("👑 Dono do canal: %s", owner.id if owner else "Desconhecido")
+        except Exception as e:
+            logger.warning("⚠️ Não foi possível obter admin do canal %s: %s", chat.id, e)
             owner = None
 
-        sess.merge(Channel(id=chat.id, owner_id=owner.id if owner else None,
-                           username=username, title=chat.title or username,
-                           authenticated=False))
+        # Salvar canal e relacionamento
+        sess.merge(Channel(
+            id=chat.id,
+            owner_id=owner.id if owner else None,
+            username=username,
+            title=chat.title or username,
+            authenticated=False
+        ))
         gid = state["group_id"]
         sess.add(GroupChannel(group_id=gid, channel_id=chat.id, inviter_id=uid, accepted=None))
         sess.commit()
+        user_states.pop(uid, None)
 
-        await update.message.reply_text(
+        logger.info("📨 Convite registrado: canal=%s, grupo=%s", chat.id, gid)
+
+        return await update.message.reply_text(
             "✅ Convite enviado ao canal. Agora ele precisa aceitar!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Voltar", callback_data="start")]])
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("↩️ Voltar", callback_data="start")]
+            ])
         )
-        user_states.pop(uid)
-
 # 6️⃣ Menu Meus Canais
 async def menu_meus_canais(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
