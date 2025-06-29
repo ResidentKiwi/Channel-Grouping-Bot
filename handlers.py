@@ -445,16 +445,34 @@ async def sair_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # 1️⃣8️⃣ Replicar posts entre canais do grupo
 async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
-    if not msg: return
+    if not msg:
+        return
+
     sess = Session()
     gcs = sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all()
+
+    if not gcs:
+        logger.info("📭 Nenhum grupo ativo para o canal %s", msg.chat.id)
+        return
+
+    logger.info("📨 Nova mensagem em canal %s (%s)", msg.chat.title, msg.chat.id)
+
     for gc in gcs:
-        for tgt in sess.get(Group, gc.group_id).channels:
-            if tgt.accepted and tgt.channel_id != msg.chat.id:
+        grupo = sess.get(Group, gc.group_id)
+        if not grupo:
+            continue
+
+        for target in grupo.channels:
+            if target.accepted and target.channel_id != msg.chat.id:
                 try:
-                    await forward(msg.chat.id, tgt.channel_id, msg.message_id)
+                    await ctx.bot.forward_message(
+                        chat_id=target.channel_id,
+                        from_chat_id=msg.chat.id,
+                        message_id=msg.message_id
+                    )
+                    logger.info("📤 Post encaminhado de %s → %s", msg.chat.id, target.channel_id)
                 except Exception as e:
-                    logger.error("Erro replicando post para canal %s: %s", tgt.channel_id, e)
+                    logger.error("❌ Erro ao encaminhar para %s: %s", target.channel_id, e)
 
 # Centralizador de callbacks
 async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
