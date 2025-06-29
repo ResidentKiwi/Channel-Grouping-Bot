@@ -1,10 +1,9 @@
 import re, logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from telegram.error import BadRequest
+from telegram.error import BadRequest, Forbidden
 from db import Session, User, Channel, Group, GroupChannel
 from queue_worker import forward
-from telegram.error import BadRequest, Forbidden
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
