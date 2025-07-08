@@ -320,7 +320,7 @@ async def ver_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for gc in parts:
         ch = sess.get(Channel, gc.channel_id)
         try:
-            subs = await ctx.bot.get_chat_member_count(ch.id)
+            subs = await ctx.bot.get_chat_members_count(ch.id)
         except:
             subs = "?"
         link = f"https://t.me/{ch.username}" if ch.username else str(ch.id)
@@ -458,10 +458,12 @@ async def menu_sair_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def sair_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     _, _, gid, cid = update.callback_query.data.split("_")
-    gid, cid = int(gid), int(cid)
     sess = Session()
-    sess.query(GroupChannel).filter_by(group_id=gid, channel_id=cid).delete()
-    sess.commit()
+    try:
+        sess.query(GroupChannel).filter_by(group_id=int(gid), channel_id=int(cid)).delete()
+        sess.commit()
+    finally:
+        sess.close()
     return await menu_sair_grupo(update, ctx)
 
 # 1️⃣9️⃣ Replicar posts entre canais
