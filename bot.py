@@ -29,7 +29,7 @@ async def handle_channel_post(update: Update, ctx):
 bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 bot_app.add_handler(CallbackQueryHandler(handle_callback_query))
-bot_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.ALL, handle_channel_post))
+bot_app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, handle_channel_post))
 
 # 🔧 FastAPI app
 telegram_bot = Bot(TOKEN)
