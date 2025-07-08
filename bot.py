@@ -40,7 +40,10 @@ async def startup():
     logger.info("🔧 Inicializando bot...")
     await bot_app.initialize()
     await telegram_bot.delete_webhook()
-    await telegram_bot.set_webhook(WEBHOOK_URL)
+    await telegram_bot.set_webhook(
+    url=WEBHOOK_URL,
+    allowed_updates=["channel_post"]
+    )
     logger.info("✅ Webhook pronto!")
 
 @app.post("/webhook")
