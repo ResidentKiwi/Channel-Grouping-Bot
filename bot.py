@@ -42,7 +42,7 @@ async def startup():
     await telegram_bot.delete_webhook()
     await telegram_bot.set_webhook(
         url=WEBHOOK_URL,
-        allowed_updates=["channel_post"]
+        allowed_updates=["message", "channel_post", "callback_query"]
     )
     logger.info("✅ Webhook pronto!")
 
