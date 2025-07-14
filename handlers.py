@@ -1,5 +1,6 @@
-import re, logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import re, logging, asyncio
+from collections import defaultdict
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest, Forbidden
 from db import Session, User, Channel, Group, GroupChannel
@@ -466,22 +467,58 @@ async def sair_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sess.close()
     return await menu_sair_grupo(update, ctx)
 
-# 1️⃣9️⃣ Replicar posts entre canais
+# 1️⃣9️⃣ Replicar posts entre canais (mensagens simples e álbuns)
+media_group_buffer: dict[str, list[Message]] = defaultdict(list)
+media_group_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
 async def new_post(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.channel_post
     if not msg:
         return
+
     sess = Session()
     gcs = sess.query(GroupChannel).filter_by(channel_id=msg.chat.id, accepted=True).all()
-    for gc in gcs:
-        grp = sess.get(Group, gc.group_id)
-        for tgt in grp.channels:
-            if tgt.accepted and tgt.channel_id != msg.chat.id:
-                try:
-                    await forward(msg.chat.id, tgt.channel_id, msg.message_id)
-                except Exception as e:
-                    logger.error("Erro replicando post para canal %s: %s", tgt.channel_id, e)
+    if not gcs:
+        return
 
+    # 🔁 Encaminhar álbuns (media_group)
+    if msg.media_group_id:
+        group_id = msg.media_group_id
+        lock = media_group_locks[group_id]
+
+        async with lock:
+            media_group_buffer[group_id].append(msg)
+            await asyncio.sleep(2.5)
+
+            album = sorted(media_group_buffer[group_id], key=lambda m: m.message_id)
+            del media_group_buffer[group_id]
+            del media_group_locks[group_id]
+
+            for gc in gcs:
+                grupo = sess.get(Group, gc.group_id)
+                if not grupo:
+                    continue
+                for destino in grupo.channels:
+                    if destino.accepted and destino.channel_id != msg.chat.id:
+                        for part in album:
+                            try:
+                                await forward(part.chat.id, destino.channel_id, part.message_id)
+                            except Exception as e:
+                                print(f"Erro ao encaminhar parte de álbum para {destino.channel_id}: {e}")
+        return
+
+    # 🔁 Encaminhar mensagens individuais
+    for gc in gcs:
+        grupo = sess.get(Group, gc.group_id)
+        if not grupo:
+            continue
+        for destino in grupo.channels:
+            if destino.accepted and destino.channel_id != msg.chat.id:
+                try:
+                    await forward(msg.chat.id, destino.channel_id, msg.message_id)
+                except Exception as e:
+                    print(f"Erro ao encaminhar para {destino.channel_id}: {e}")
+                    
 # 2️⃣0️⃣ Central de callbacks
 async def handle_callback_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = update.callback_query.data or ""
